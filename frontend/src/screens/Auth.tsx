@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { api, ApiError, setToken, User } from '../api';
+import { BOT_USERNAME, EMAIL_AUTH } from '../tg';
 
 /** Вход по email — для запуска вне Telegram (браузер). Внутри Telegram вход автоматический. */
-export function Auth({ onAuth }: { onAuth: (u: User) => void }) {
+function EmailAuth({ onAuth }: { onAuth: (u: User) => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -71,4 +72,65 @@ export function Auth({ onAuth }: { onAuth: (u: User) => void }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Вход через ТюмГУ: логин/пароль от Modeus. Успешный вход = подтверждённый студент,
+ * сразу после него подтягивается расписание. Письма на почту не нужны.
+ */
+function TyumguAuth({ onAuth }: { onAuth: (u: User) => void }) {
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit() {
+    if (!login || !password || busy) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await api<{ token: string; user: User }>('/auth/modeus', { method: 'POST', body: { login, password } });
+      setPassword('');
+      setToken(r.token);
+      onAuth(r.user);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Ошибка');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth">
+      <div className="logo">ПАРА</div>
+      <div className="auth-card">
+        <div className="eyebrow">ТЮМГУ · СТУДЕНЧЕСКОЕ ПРИЛОЖЕНИЕ</div>
+        <h1>Войти через ТюмГУ</h1>
+        <p className="muted">
+          Логин и пароль от Modeus (utmn.modeus.org). Так мы убеждаемся, что ты студент ТюмГУ, и подтягиваем расписание. Пароль
+          используется один раз и не сохраняется.
+        </p>
+        <input placeholder="Логин ТюмГУ" autoComplete="username" autoCapitalize="none" value={login} onChange={(e) => setLogin(e.target.value)} />
+        <input
+          placeholder="Пароль"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+        />
+        <button disabled={busy || !login || !password} onClick={submit}>
+          {busy ? 'Входим… (до 20 секунд)' : 'Войти'}
+        </button>
+        {err && <p className="msg err">{err}</p>}
+        <a className="switch" href={`https://t.me/${BOT_USERNAME}`}>
+          Или открой приложение в Telegram
+        </a>
+      </div>
+    </div>
+  );
+}
+
+export function Auth({ onAuth }: { onAuth: (u: User) => void }) {
+  return EMAIL_AUTH ? <EmailAuth onAuth={onAuth} /> : <TyumguAuth onAuth={onAuth} />;
 }
