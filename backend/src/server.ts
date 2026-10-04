@@ -117,6 +117,35 @@ app.post('/api/auth/telegram', limit('tg', 30, 60_000), async (req, res) => {
   res.json({ token: sign(user.id), user });
 });
 
+// ───────────────────────── авторизация: через ТюмГУ (Modeus) ─────────────────────────
+// Успешный вход в Modeus = подтверждение, что человек учится в ТюмГУ. Почта и письма не нужны.
+
+app.post('/api/auth/modeus', limit('modeus-auth', 6, 10 * 60_000), async (req, res) => {
+  const p = z.object({ login: z.string().min(1).max(128), password: z.string().min(1).max(256) }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: 'Введи логин и пароль' });
+  try {
+    const { session, personId } = await modeusLogin(p.data.login.trim(), p.data.password);
+    let name: string | null = null;
+    try {
+      const claims = JSON.parse(Buffer.from(session.token.split('.')[1], 'base64url').toString('utf8'));
+      name = String(claims.name ?? claims.fullName ?? '').trim() || null;
+    } catch {
+      /* в токене может не быть имени */
+    }
+    const linked = { modeusPersonId: personId, modeusSession: encrypt(JSON.stringify(session)), modeusLinkedAt: new Date() };
+    const existing = await db.user.findFirst({ where: { modeusPersonId: personId } });
+    const user = existing
+      ? await db.user.update({ where: { id: existing.id }, data: linked, select: userSelect })
+      : await db.user.create({ data: { ...linked, name }, select: userSelect });
+    scheduleCache.clear();
+    res.json({ token: sign(user.id), user });
+  } catch (e) {
+    if (e instanceof ModeusBadCredentials) return res.status(401).json({ error: e.message, code: 'MODEUS_BAD_CREDENTIALS' });
+    console.error('[modeus] auth:', (e as Error).message); // пароль сюда не попадает
+    res.status(502).json({ error: 'Не получилось войти в Modeus. Попробуй позже.', code: 'MODEUS_UPSTREAM' });
+  }
+});
+
 // ───────────────────────── авторизация: email + SMTP ─────────────────────────
 
 app.post('/api/auth/register', limit('register', 10, 60 * 60_000), async (req, res) => {
