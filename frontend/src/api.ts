@@ -35,10 +35,10 @@ export async function api<T>(path: string, opts: { method?: string; body?: unkno
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
   } catch {
-    throw new ApiError('Нет соединения с сервером', 0, 'NETWORK');
+    throw new ApiError(`Нет соединения с сервером (${BASE})`, 0, 'NETWORK');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error || 'Ошибка', res.status, data.code);
+  if (!res.ok) throw new ApiError(data.error || `Ошибка сервера (HTTP ${res.status}) — проверь VITE_API_URL`, res.status, data.code);
   return data as T;
 }
 
