@@ -33,3 +33,7 @@ export const haptic = (t: 'success' | 'error' = 'success') => {
     /* ignore */
   }
 };
+/** Вход/регистрация по email. Включается переменной VITE_EMAIL_AUTH=1 (нужна рабочая отправка почты). */
+export const EMAIL_AUTH = import.meta.env.VITE_EMAIL_AUTH === '1';
+/** Имя бота без @ — для кнопки «Открыть в Telegram» */
+export const BOT_USERNAME: string = import.meta.env.VITE_BOT_USERNAME || 'para_tyumgu_bot';
