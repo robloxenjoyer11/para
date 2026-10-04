@@ -5,7 +5,7 @@ const env = (k: string, d = '') => (process.env[k] ?? d).trim();
 
 export const config = {
   isProd,
-  port: Number(env('PORT', '3001')),
+  port: process.env.PORT ? Number(process.env.PORT) : 3001,
   databaseUrl: env('DATABASE_URL'),
   jwtSecret: env('JWT_SECRET', 'dev-secret-change-me'),
   encryptionKey: env('ENCRYPTION_KEY') || env('JWT_SECRET', 'dev-secret-change-me'),
