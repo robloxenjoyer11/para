@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String                   @id @default(uuid())
+  telegramId         BigInt?                  @unique
+  email              String?                  @unique
+  emailVerified      Boolean                  @default(false)
+  passwordHash       String?
+  name               String?
+  faculty            String?
+  course             Int?
+  bio                String?
+  avatarUrl          String?
+  interests          String[]                 @default([])
+  // Привязка Modeus: person_id из токена и зашифрованная сессия (токен + cookie SSO). Пароль НЕ хранится.
+  modeusPersonId     String?
+  modeusSession      String?
+  modeusLinkedAt     DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  verificationTokens EmailVerificationToken[]
+  events             Event[]                  @relation("EventCreator")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  date        DateTime
+  place       String?
+  category    String?
+  creatorId   String
+  creator     User     @relation("EventCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+}
