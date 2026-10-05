@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api, ApiError, CATEGORIES, EventItem } from '../api';
 import { fmtDateTime } from '../dates';
+import { SkeletonList } from '../ui';
 import { haptic } from '../tg';
 
 export function Events() {
@@ -22,7 +23,7 @@ export function Events() {
   const shown = filter ? items.filter((e) => e.category === filter) : items;
 
   return (
-    <main>
+    <main className="view">
       <div className="row">
         <h2 style={{ margin: 0 }}>Ивенты</h2>
         <button className="btn small" onClick={() => setCreating(!creating)}>
@@ -39,8 +40,9 @@ export function Events() {
         ))}
       </div>
 
-      {loading && <p className="muted center">Загружаем…</p>}
+      {loading && <SkeletonList n={3} h={96} />}
       {!loading && shown.length === 0 && <p className="muted center">Здесь пока пусто</p>}
+      <div className="stagger" key={filter ?? 'all'}>
       {shown.map((e) => (
         <div className="event col" key={e.id}>
           <div className="row">
@@ -52,6 +54,7 @@ export function Events() {
           <p className="muted">Организатор: {e.creator.name || 'студент'}</p>
         </div>
       ))}
+      </div>
     </main>
   );
 }

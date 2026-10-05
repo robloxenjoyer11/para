@@ -4,7 +4,7 @@ type TgWebApp = {
   expand(): void;
   setHeaderColor?(c: string): void;
   setBackgroundColor?(c: string): void;
-  HapticFeedback?: { impactOccurred(s: 'light' | 'medium' | 'heavy'): void; notificationOccurred(t: 'error' | 'success' | 'warning'): void };
+  HapticFeedback?: { selectionChanged(): void; impactOccurred(s: 'light' | 'medium' | 'heavy'): void; notificationOccurred(t: 'error' | 'success' | 'warning'): void };
 };
 declare global {
   interface Window {
@@ -26,6 +26,13 @@ export function initTelegram() {
     /* старые клиенты */
   }
 }
+export const tick = () => {
+  try {
+    tg?.HapticFeedback?.selectionChanged();
+  } catch {
+    /* ignore */
+  }
+};
 export const haptic = (t: 'success' | 'error' = 'success') => {
   try {
     tg?.HapticFeedback?.notificationOccurred(t);
@@ -33,6 +40,7 @@ export const haptic = (t: 'success' | 'error' = 'success') => {
     /* ignore */
   }
 };
+
 /** Вход/регистрация по email. Включается переменной VITE_EMAIL_AUTH=1 (нужна рабочая отправка почты). */
 export const EMAIL_AUTH = import.meta.env.VITE_EMAIL_AUTH === '1';
 /** Имя бота без @ — для кнопки «Открыть в Telegram» */

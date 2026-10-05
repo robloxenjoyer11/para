@@ -14,13 +14,17 @@ import { sendVerificationEmail, smtpConfigured, verifySmtp } from './mail';
 import { startBot, botUsername } from './bot';
 import { encrypt, decrypt } from './crypto';
 import {
+  Grade,
   Lesson,
   ModeusBadCredentials,
   ModeusSession,
   ModeusSessionExpired,
   ModeusUpstreamError,
   ensureFreshSession,
+  fetchGrades,
   fetchLessons,
+  gradesConfigured,
+  nameFromToken,
   modeusLogin,
 } from './integrations/modeus';
 
@@ -29,7 +33,7 @@ const app = express();
 app.set('trust proxy', 1); // за ngrok / cloudflared / nginx
 app.disable('x-powered-by');
 app.use(cors({ origin: config.appOrigin, credentials: true }));
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: '400kb' })); // аватарки приходят сжатыми data-URL (≈20–40 КБ)
 
 // ───────────────────────── утилиты ─────────────────────────
 
@@ -108,12 +112,19 @@ app.post('/api/auth/telegram', limit('tg', 30, 60_000), async (req, res) => {
   if (!tg) return res.status(401).json({ error: 'Не удалось проверить данные Telegram' });
 
   const name = [tg.first_name, tg.last_name].filter(Boolean).join(' ') || tg.username || null;
-  const user = await db.user.upsert({
-    where: { telegramId: BigInt(tg.id) },
-    create: { telegramId: BigInt(tg.id), name, avatarUrl: tg.photo_url ?? null },
-    update: tg.photo_url ? { avatarUrl: tg.photo_url } : {},
-    select: userSelect,
-  });
+  const existing = await db.user.findUnique({ where: { telegramId: BigInt(tg.id) }, select: { id: true, avatarUrl: true } });
+  let user;
+  if (existing) {
+    // Загруженную пользователем аватарку (data:) не трогаем, фото из Telegram обновляем
+    const custom = existing.avatarUrl?.startsWith('data:');
+    user = await db.user.update({
+      where: { id: existing.id },
+      data: !custom && tg.photo_url ? { avatarUrl: tg.photo_url } : {},
+      select: userSelect,
+    });
+  } else {
+    user = await db.user.create({ data: { telegramId: BigInt(tg.id), name, avatarUrl: tg.photo_url ?? null }, select: userSelect });
+  }
   res.json({ token: sign(user.id), user });
 });
 
@@ -125,17 +136,11 @@ app.post('/api/auth/modeus', limit('modeus-auth', 6, 10 * 60_000), async (req, r
   if (!p.success) return res.status(400).json({ error: 'Введи логин и пароль' });
   try {
     const { session, personId } = await modeusLogin(p.data.login.trim(), p.data.password);
-    let name: string | null = null;
-    try {
-      const claims = JSON.parse(Buffer.from(session.token.split('.')[1], 'base64url').toString('utf8'));
-      name = String(claims.name ?? claims.fullName ?? '').trim() || null;
-    } catch {
-      /* в токене может не быть имени */
-    }
+    const name = await resolveModeusName(session, personId);
     const linked = { modeusPersonId: personId, modeusSession: encrypt(JSON.stringify(session)), modeusLinkedAt: new Date() };
     const existing = await db.user.findFirst({ where: { modeusPersonId: personId } });
     const user = existing
-      ? await db.user.update({ where: { id: existing.id }, data: linked, select: userSelect })
+      ? await db.user.update({ where: { id: existing.id }, data: { ...linked, ...(name ? { name } : {}) }, select: userSelect })
       : await db.user.create({ data: { ...linked, name }, select: userSelect });
     scheduleCache.clear();
     res.json({ token: sign(user.id), user });
@@ -190,9 +195,9 @@ const page = (title: string, text: string, ok: boolean) => {
   const tgLink = botUsername ? `https://t.me/${botUsername}` : '';
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ПАРА</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#1455D9;font-family:Arial,sans-serif;color:#0B1630}
-.c{background:#fff;border-radius:28px;padding:32px;max-width:380px;margin:20px;text-align:center}.l{font-size:44px;font-weight:800;color:#1455D9;letter-spacing:-3px}
+.c{background:#fff;border-radius:28px;padding:32px;max-width:380px;margin:20px;text-align:center}.l{height:auto;margin-bottom:6px}
 h1{font-size:22px}p{color:#4b5568;line-height:1.5}a{display:inline-block;margin-top:12px;background:#1455D9;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:14px}</style></head>
-<body><div class="c"><div class="l">ПАРА</div><h1>${ok ? '✅' : '⚠️'} ${title}</h1><p>${text}</p>${tgLink ? `<a href="${tgLink}">Открыть в Telegram</a>` : ''}</div></body></html>`;
+<body><div class="c"><img class="l" src="${config.webappUrl}/logo-blue.png" alt="ПАРА" width="150"><h1>${ok ? '✅' : '⚠️'} ${title}</h1><p>${text}</p>${tgLink ? `<a href="${tgLink}">Открыть в Telegram</a>` : ''}</div></body></html>`;
 };
 
 app.get('/api/auth/verify', async (req, res) => {
@@ -301,16 +306,37 @@ function loadSession(u: { modeusSession: string | null }): ModeusSession | null 
 const scheduleCache = new Map<string, { at: number; lessons: Lesson[] }>();
 const CACHE_TTL = 2 * 60_000;
 
+/**
+ * Имя студента, как оно записано в Modeus («Александр Новгородов»).
+ * Сначала из токена; если там нет — из ответа расписания (если Modeus кладёт туда самого студента).
+ */
+async function resolveModeusName(session: ModeusSession, personId: string): Promise<string | null> {
+  const fromToken = nameFromToken(session.token);
+  if (fromToken) return fromToken;
+  try {
+    const { from, to } = defaultRange();
+    const r = await fetchLessons(session, personId, from, to);
+    return r.selfName;
+  } catch {
+    return null; // имя — приятный бонус, привязку из-за него не ломаем
+  }
+}
+
 app.post('/api/modeus/link', auth, limit('modeus-link', 5, 10 * 60_000, 'user'), async (req, res) => {
   const p = z.object({ login: z.string().min(1).max(128), password: z.string().min(1).max(256) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: 'Введи логин и пароль' });
   try {
     const { session, personId } = await modeusLogin(p.data.login.trim(), p.data.password);
+    const modeusName = await resolveModeusName(session, personId);
     await db.user.update({
       where: { id: uid(res) },
-      data: { modeusPersonId: personId, modeusSession: encrypt(JSON.stringify(session)), modeusLinkedAt: new Date() },
+      data: {
+        modeusPersonId: personId,
+        modeusSession: encrypt(JSON.stringify(session)),
+        modeusLinkedAt: new Date(),
+        ...(modeusName ? { name: modeusName } : {}),
+      },
     });
-    scheduleCache.clear();
     res.json({ ok: true });
   } catch (e) {
     if (e instanceof ModeusBadCredentials) return res.status(401).json({ error: e.message, code: 'MODEUS_BAD_CREDENTIALS' });
@@ -358,8 +384,9 @@ app.get('/api/schedule', auth, async (req, res) => {
     if (fresh.token !== session.token) {
       await db.user.update({ where: { id: user.id }, data: { modeusSession: encrypt(JSON.stringify(fresh)) } });
     }
-    const lessons = await fetchLessons(fresh, user.modeusPersonId, range.from, range.to);
+    const { lessons, selfName } = await fetchLessons(fresh, user.modeusPersonId, range.from, range.to);
     scheduleCache.set(key, { at: Date.now(), lessons });
+    if (selfName && selfName !== user.name) await db.user.update({ where: { id: user.id }, data: { name: selfName } }).catch(() => {});
     res.json({ ...range, lessons });
   } catch (e) {
     if (e instanceof ModeusSessionExpired) {
@@ -372,6 +399,51 @@ app.get('/api/schedule', auth, async (req, res) => {
       error: e instanceof ModeusUpstreamError ? 'Modeus сейчас недоступен или изменился формат ответа' : 'Не удалось получить расписание',
       code: 'MODEUS_UPSTREAM',
     });
+  }
+});
+
+// ───────────────────────── аватарка ─────────────────────────
+
+const AVATAR_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+
+app.put('/api/me/avatar', auth, limit('avatar', 12, 10 * 60_000, 'user'), async (req, res) => {
+  const { dataUrl } = z.object({ dataUrl: z.string().max(220_000) }).parse(req.body);
+  if (!AVATAR_RE.test(dataUrl)) return res.status(400).json({ error: 'Нужна картинка JPG, PNG или WebP' });
+  res.json(await db.user.update({ where: { id: uid(res) }, data: { avatarUrl: dataUrl }, select: userSelect }));
+});
+
+app.delete('/api/me/avatar', auth, async (_req, res) => {
+  res.json(await db.user.update({ where: { id: uid(res) }, data: { avatarUrl: null }, select: userSelect }));
+});
+
+// ───────────────────────── оценки ─────────────────────────
+
+const gradesCache = new Map<string, { at: number; grades: Grade[] }>();
+
+app.get('/api/grades', auth, async (_req, res) => {
+  if (!gradesConfigured()) {
+    return res.status(501).json({ error: 'Оценки пока не подключены', code: 'GRADES_NOT_CONFIGURED' });
+  }
+  const user = await db.user.findUnique({ where: { id: uid(res) } });
+  const session = user && loadSession(user);
+  if (!user || !session || !user.modeusPersonId) {
+    return res.status(409).json({ error: 'Modeus не подключён', code: 'MODEUS_NOT_LINKED' });
+  }
+  const cached = gradesCache.get(user.id);
+  if (cached && Date.now() - cached.at < 5 * 60_000) return res.json({ grades: cached.grades });
+  try {
+    const fresh = await ensureFreshSession(session);
+    if (fresh.token !== session.token) {
+      await db.user.update({ where: { id: user.id }, data: { modeusSession: encrypt(JSON.stringify(fresh)) } });
+    }
+    const grades = await fetchGrades(fresh, user.modeusPersonId);
+    gradesCache.set(user.id, { at: Date.now(), grades });
+    res.json({ grades });
+  } catch (e) {
+    if (e instanceof ModeusSessionExpired) return res.status(409).json({ error: e.message, code: 'MODEUS_RELOGIN' });
+    console.error('[modeus] grades:', (e as Error).message);
+    if (cached) return res.json({ grades: cached.grades, stale: true });
+    res.status(502).json({ error: 'Не удалось получить оценки', code: 'MODEUS_UPSTREAM' });
   }
 });
 

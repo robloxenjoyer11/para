@@ -5,7 +5,7 @@ const env = (k: string, d = '') => (process.env[k] ?? d).trim();
 
 export const config = {
   isProd,
-  port: process.env.PORT ? Number(process.env.PORT) : 3001,
+  port: Number(env('PORT', '3001')),
   databaseUrl: env('DATABASE_URL'),
   jwtSecret: env('JWT_SECRET', 'dev-secret-change-me'),
   encryptionKey: env('ENCRYPTION_KEY') || env('JWT_SECRET', 'dev-secret-change-me'),
@@ -27,9 +27,13 @@ export const config = {
     baseUrl: env('MODEUS_BASE_URL', 'https://utmn.modeus.org').replace(/\/$/, ''),
     authUrl: env('MODEUS_AUTH_URL'), // необязательно: подхватывается из app.config.json
     clientId: env('MODEUS_CLIENT_ID'), // необязательно
-    tz: env('MODEUS_TZ', 'Asia/Yekaterinburg'),
+    tz: env('MODEUS_TZ', 'Asia/Tyumen'),
     utcOffset: env('MODEUS_UTC_OFFSET', '+05:00'),
     searchPath: env('MODEUS_SEARCH_PATH', '/schedule-calendar-v2/api/calendar/events/search'),
+    // Оценки: адрес берётся из DevTools (см. README). Пока не задан — раздел показывает заглушку.
+    gradesPath: env('MODEUS_GRADES_PATH'), // например /students-app/api/...  (относительно MODEUS_BASE_URL)
+    gradesMethod: env('MODEUS_GRADES_METHOD', 'GET').toUpperCase(),
+    gradesBody: env('MODEUS_GRADES_BODY'), // JSON-строка; {personId} заменится на id студента
     mock: env('MODEUS_MOCK') === '1',
     debug: env('MODEUS_DEBUG') === '1',
   },

@@ -52,6 +52,28 @@ export type Lesson = {
   cancelled: boolean;
 };
 
+export type Grade = {
+  id: string;
+  subject: string;
+  kind: 'exam' | 'credit' | 'coursework' | 'test' | 'other';
+  kindLabel: string;
+  value: string; // «5», «Зачтено», «87» — как отдал Modeus
+  numeric: number | null;
+  max: number | null;
+  date: string | null;
+  semester: string | null;
+  teacher: string | null;
+};
+
+/** «Новгородов Александр Сергеевич» → «Александр Новгородов» (в Modeus ФИО идёт в порядке Ф-И-О) */
+export function prettyName(full: string, first?: string, last?: string): string | null {
+  const f = (first ?? '').trim(), l = (last ?? '').trim();
+  if (f && l) return `${f} ${l}`;
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[1]} ${parts[0]}`;
+  return parts[0] ?? null;
+}
+
 // ───────────────────────── HTTP с cookie ─────────────────────────
 
 const log = (...a: unknown[]) => M.debug && console.log('[modeus]', ...a);
@@ -316,6 +338,20 @@ function decodeJwt(token: string): Record<string, any> {
   }
 }
 
+/** Имя студента из claims токена (если Modeus их туда кладёт). В debug пишем только НАЗВАНИЯ полей. */
+export function nameFromToken(token: string): string | null {
+  try {
+    const c = decodeJwt(token);
+    log('claims в токене:', Object.keys(c).join(', '));
+    const full = String(c.name ?? c.fullName ?? c.full_name ?? c.displayName ?? '').trim();
+    const first = String(c.given_name ?? c.firstName ?? '').trim();
+    const last = String(c.family_name ?? c.lastName ?? '').trim();
+    return full || (first && last) ? prettyName(full, first, last) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const tokenInfo = (token: string) => {
   const p = decodeJwt(token);
   return { personId: String(p.person_id ?? ''), exp: Number(p.exp ?? 0) * 1000 };
@@ -376,6 +412,12 @@ const idFromHref = (l: any): string | undefined => {
 const index = (arr: any[] | undefined) => new Map<string, any>((arr ?? []).filter((x) => x?.id).map((x) => [x.id, x]));
 const withOffset = (s: string) => (/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : s + M.utcOffset);
 
+/** Свой профиль в ответе расписания (если Modeus кладёт студента в persons) */
+export function selfNameFrom(data: any, personId: string): string | null {
+  const p = (data?._embedded?.persons ?? []).find((x: any) => x?.id === personId);
+  return p ? prettyName(String(p.fullName ?? ''), p.firstName, p.lastName) : null;
+}
+
 export function normalizeLessons(data: any): Lesson[] {
   const e = data?._embedded ?? {};
   const cru = index(e['course-unit-realizations']);
@@ -433,8 +475,13 @@ export function normalizeLessons(data: any): Lesson[] {
 }
 
 /** from/to — даты YYYY-MM-DD (включительно) в часовом поясе вуза */
-export async function fetchLessons(session: ModeusSession, personId: string, from: string, to: string): Promise<Lesson[]> {
-  if (M.mock) return mockLessons(from);
+export async function fetchLessons(
+  session: ModeusSession,
+  personId: string,
+  from: string,
+  to: string
+): Promise<{ lessons: Lesson[]; selfName: string | null }> {
+  if (M.mock) return { lessons: mockLessons(from), selfName: 'Александр Новгородов' };
 
   const res = await fetch(`${M.baseUrl}${M.searchPath}?tz=${encodeURIComponent(M.tz)}`, {
     method: 'POST',
@@ -455,7 +502,10 @@ export async function fetchLessons(session: ModeusSession, personId: string, fro
   log('search', res.status);
   if (res.status === 401 || res.status === 403) throw new ModeusSessionExpired();
   if (!res.ok) throw new ModeusUpstreamError(`Modeus ответил HTTP ${res.status}`);
-  return normalizeLessons(await res.json());
+  const data = await res.json();
+  const selfName = selfNameFrom(data, personId);
+  log('persons в ответе:', (data?._embedded?.persons ?? []).length, ', себя нашли:', Boolean(selfName));
+  return { lessons: normalizeLessons(data), selfName };
 }
 
 function mockLessons(from: string): Lesson[] {
@@ -475,5 +525,123 @@ function mockLessons(from: string): Lesson[] {
     mk(3, 1, 12, 0, 'Английский язык', 'seminar', 'Семинар', 'ауд. 112', 'Смирнова Е. В.'),
     mk(4, 2, 8, 30, 'Дискретная математика', 'lecture', 'Лекция', 'ауд. 201', 'Козлов Д. А.'),
     mk(5, 3, 13, 40, 'Базы данных', 'seminar', 'Семинар', 'ауд. 307', 'Орлов П. Н.'),
+  ];
+}
+
+
+// ───────────────────────── Оценки ─────────────────────────
+
+const GRADE_KIND: [RegExp, Grade['kind'], string][] = [
+  [/экзамен|exam/i, 'exam', 'Экзамен'],
+  [/зач[её]т|credit/i, 'credit', 'Зачёт'],
+  [/курсов|course.?work/i, 'coursework', 'Курсовая'],
+  [/тест|контрол|check|test/i, 'test', 'Контроль'],
+];
+const SUBJECT_KEYS = ['courseUnitName', 'courseName', 'subjectName', 'disciplineName', 'discipline', 'subject', 'name', 'title'];
+const VALUE_KEYS = ['grade', 'mark', 'score', 'result', 'resultName', 'totalScore', 'finalGrade', 'assessment', 'points', 'value'];
+
+const pickStr = (o: any, keys: string[]): string | null => {
+  for (const k of keys) {
+    const v = o?.[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number') return String(v);
+    if (v && typeof v === 'object') {
+      const inner = pickStr(v, ['name', 'nameShort', 'title', 'value', 'text']);
+      if (inner) return inner;
+    }
+  }
+  return null;
+};
+
+/**
+ * Эвристический разбор: ищем во всём JSON объекты, где есть и «название предмета», и «оценка».
+ * Формат ответа Modeus по оценкам заранее неизвестен — после первой проверки на реальных данных
+ * этот разбор нужно уточнить под точную структуру.
+ */
+export function normalizeGrades(data: any): Grade[] {
+  const out: Grade[] = [];
+  const seen = new Set<string>();
+  const walk = (node: any, depth: number) => {
+    if (depth > 8 || node == null) return;
+    if (Array.isArray(node)) return node.forEach((n) => walk(n, depth + 1));
+    if (typeof node !== 'object') return;
+    const subject = pickStr(node, SUBJECT_KEYS);
+    const value = pickStr(node, VALUE_KEYS);
+    if (subject && value && !/^(true|false)$/i.test(value)) {
+      const kindText = pickStr(node, ['controlType', 'controlForm', 'type', 'typeName', 'form', 'kind']) ?? '';
+      const [, kind, kindLabel] = GRADE_KIND.find(([re]) => re.test(kindText)) ?? [null, 'other' as const, kindText || 'Оценка'];
+      const num = Number(value.replace(',', '.'));
+      const max = Number(node.maxScore ?? node.max ?? node.maxPoints);
+      const date = pickStr(node, ['date', 'gradeDate', 'passDate', 'updatedAt', 'createdAt']);
+      const id = String(node.id ?? `${subject}|${kindText}|${value}|${date ?? ''}`);
+      if (!seen.has(id)) {
+        seen.add(id);
+        out.push({
+          id,
+          subject,
+          kind,
+          kindLabel,
+          value,
+          numeric: Number.isFinite(num) ? num : null,
+          max: Number.isFinite(max) && max > 0 ? max : null,
+          date: date && !Number.isNaN(Date.parse(date)) ? new Date(date).toISOString() : null,
+          semester: pickStr(node, ['semester', 'semesterName', 'term', 'period']),
+          teacher: pickStr(node, ['teacher', 'teacherName', 'examiner', 'lecturer']),
+        });
+      }
+      return; // внутрь найденной оценки не спускаемся — иначе вложенный {name, value} превратится в «ещё одну оценку»
+    }
+    for (const v of Object.values(node)) if (v && typeof v === 'object') walk(v, depth + 1);
+  };
+  walk(data, 0);
+  return out;
+}
+
+export const gradesConfigured = () => M.mock || Boolean(M.gradesPath);
+
+export async function fetchGrades(session: ModeusSession, personId: string): Promise<Grade[]> {
+  if (M.mock) return mockGrades();
+  if (!M.gradesPath) throw new ModeusUpstreamError('GRADES_NOT_CONFIGURED');
+  const hasBody = M.gradesMethod !== 'GET' && M.gradesBody;
+  const res = await fetch(M.baseUrl + M.gradesPath.replace('{personId}', encodeURIComponent(personId)), {
+    method: M.gradesMethod,
+    signal: AbortSignal.timeout(20_000),
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${session.token}`,
+      'user-agent': UA,
+      ...(hasBody ? { 'content-type': 'application/json' } : {}),
+    },
+    body: hasBody ? M.gradesBody.replaceAll('{personId}', personId) : undefined,
+  });
+  log('grades', res.status);
+  if (res.status === 401 || res.status === 403) throw new ModeusSessionExpired();
+  if (!res.ok) throw new ModeusUpstreamError(`Modeus ответил HTTP ${res.status}`);
+  const grades = normalizeGrades(await res.json());
+  log('оценок распознано:', grades.length);
+  return grades;
+}
+
+function mockGrades(): Grade[] {
+  const g = (i: number, subject: string, kind: Grade['kind'], kindLabel: string, value: string, sem: string, teacher: string, daysAgo: number): Grade => ({
+    id: `mock-g${i}`,
+    subject,
+    kind,
+    kindLabel,
+    value,
+    numeric: Number.isFinite(Number(value)) ? Number(value) : null,
+    max: null,
+    date: new Date(Date.now() - daysAgo * 86400_000).toISOString(),
+    semester: sem,
+    teacher,
+  });
+  return [
+    g(1, 'Математический анализ', 'exam', 'Экзамен', '5', '2 семестр 2025/26', 'Иванов И. И.', 120),
+    g(2, 'Программирование', 'exam', 'Экзамен', '4', '2 семестр 2025/26', 'Петрова А. С.', 115),
+    g(3, 'Английский язык', 'credit', 'Зачёт', 'Зачтено', '2 семестр 2025/26', 'Смирнова Е. В.', 110),
+    g(4, 'Дискретная математика', 'exam', 'Экзамен', '5', '1 семестр 2025/26', 'Козлов Д. А.', 280),
+    g(5, 'Базы данных', 'coursework', 'Курсовая', '4', '1 семестр 2025/26', 'Орлов П. Н.', 270),
+    g(6, 'История России', 'credit', 'Зачёт', 'Зачтено', '1 семестр 2025/26', 'Белов С. К.', 265),
+    g(7, 'Физика', 'exam', 'Экзамен', '3', '1 семестр 2025/26', 'Громов В. Л.', 262),
   ];
 }

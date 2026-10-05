@@ -5,11 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#1455D9" />
     <title>ПАРА</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!-- Должен грузиться ДО приложения: даёт window.Telegram.WebApp -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Заставка стилизована прямо здесь, чтобы появиться мгновенно, до загрузки основного CSS и JS -->
+    <style>
+      html, body { margin: 0; background: #1455d9; }
+      #splash { position: fixed; inset: 0; z-index: 9999; background: #1455d9; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity .45s ease, transform .45s ease; }
+      #splash.hide { opacity: 0; transform: scale(1.04); pointer-events: none; }
+      #splash img { width: min(62vw, 300px); height: auto; animation: sp-in .7s cubic-bezier(.2,.9,.3,1.2) both, sp-breathe 2.4s ease-in-out .8s infinite; }
+      #splash .dots { display: flex; gap: 8px; margin-top: 34px; }
+      #splash .dots i { width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: .35; animation: sp-dot 1s ease-in-out infinite; }
+      #splash .dots i:nth-child(2) { animation-delay: .15s; } #splash .dots i:nth-child(3) { animation-delay: .3s; }
+      #splash p { position: absolute; bottom: calc(40px + env(safe-area-inset-bottom)); margin: 0; color: #fff; font: 600 13px/1.4 system-ui, Arial, sans-serif; opacity: 0; transition: opacity .5s; text-align: center; padding: 0 24px; }
+      #splash p.show { opacity: .8; }
+      @keyframes sp-in { from { opacity: 0; transform: translateY(14px) scale(.86); } to { opacity: 1; transform: none; } }
+      @keyframes sp-breathe { 50% { transform: scale(1.035); } }
+      @keyframes sp-dot { 0%, 100% { opacity: .3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-5px); } }
+      @media (prefers-reduced-motion: reduce) { #splash img, #splash .dots i { animation: none; } #splash .dots i { opacity: .7; } }
+    </style>
   </head>
   <body>
+    <div id="splash" aria-label="Загрузка">
+      <img src="/logo-white.png" alt="ПАРА" width="300" height="89" />
+      <div class="dots"><i></i><i></i><i></i></div>
+      <p id="splash-hint">Сервер просыпается, это бывает после простоя.<br />Ещё несколько секунд…</p>
+    </div>
     <div id="root"></div>
+    <script>
+      // Если сервер на бесплатном хостинге «спал», запуск дольше обычного — честно говорим об этом
+      window.__splashHint = setTimeout(function () {
+        var h = document.getElementById('splash-hint');
+        if (h) h.classList.add('show');
+      }, 4500);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

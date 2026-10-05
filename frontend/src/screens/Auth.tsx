@@ -49,7 +49,7 @@ function EmailAuth({ onAuth }: { onAuth: (u: User) => void }) {
 
   return (
     <div className="auth">
-      <div className="logo">ПАРА</div>
+      <img className="logo-img" src="/logo-white.png" alt="ПАРА" />
       <div className="auth-card">
         <div className="eyebrow">ТЮМГУ · СТУДЕНЧЕСКОЕ ПРИЛОЖЕНИЕ</div>
         <h1>{mode === 'login' ? 'С возвращением' : 'Создай аккаунт'}</h1>
@@ -102,7 +102,7 @@ function TyumguAuth({ onAuth }: { onAuth: (u: User) => void }) {
 
   return (
     <div className="auth">
-      <div className="logo">ПАРА</div>
+      <img className="logo-img" src="/logo-white.png" alt="ПАРА" />
       <div className="auth-card">
         <div className="eyebrow">ТЮМГУ · СТУДЕНЧЕСКОЕ ПРИЛОЖЕНИЕ</div>
         <h1>Войти через ТюмГУ</h1>

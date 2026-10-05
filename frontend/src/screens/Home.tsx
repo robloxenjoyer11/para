@@ -2,8 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, CalendarDays, CalendarPlus, ChevronRight, Star, Users } from 'lucide-react';
 import { api, ApiError, EventItem, Lesson, User } from '../api';
 import { addDays, fmtDateTime, fmtTime, todayYmd } from '../dates';
+import { Skeleton } from '../ui';
 
-export type Tab = 'home' | 'schedule' | 'people' | 'events' | 'profile';
+export type Tab = 'home' | 'schedule' | 'grades' | 'people' | 'events' | 'profile';
 
 function Card(p: { icon: ReactNode; title: string; text: string; onClick?: () => void }) {
   return (
@@ -35,7 +36,7 @@ export function Home({ me, go }: { me: User; go: (t: Tab) => void }) {
   }, [me.modeusLinkedAt]);
 
   return (
-    <main>
+    <main className="view">
       <section className="next" onClick={() => go('schedule')}>
         <div>
           <span>СЛЕДУЮЩАЯ ПАРА</span>
@@ -54,7 +55,7 @@ export function Home({ me, go }: { me: User; go: (t: Tab) => void }) {
               <p>Войди в Modeus ТюмГУ — и пары появятся здесь.</p>
             </>
           ) : next === undefined ? (
-            <h1>Загружаем…</h1>
+            <Skeleton h={64} r={14} className="on-blue" />
           ) : (
             <>
               <h1>Ближайших пар нет</h1>
@@ -62,12 +63,12 @@ export function Home({ me, go }: { me: User; go: (t: Tab) => void }) {
             </>
           )}
         </div>
-        <CalendarDays size={42} />
+        <CalendarDays size={42} className="float" />
       </section>
 
-      <div className="grid">
+      <div className="grid stagger">
         <Card icon={<BookOpen />} title="Пары" text="Расписание" onClick={() => go('schedule')} />
-        <Card icon={<Star />} title="Оценки" text="Скоро" />
+        <Card icon={<Star />} title="Оценки" text="Успеваемость" onClick={() => go('grades')} />
         <Card icon={<Users />} title="Люди" text="Найди своих" onClick={() => go('people')} />
         <Card icon={<CalendarPlus />} title="Ивенты" text="Мероприятия" onClick={() => go('events')} />
       </div>
@@ -75,7 +76,7 @@ export function Home({ me, go }: { me: User; go: (t: Tab) => void }) {
       <h3>Ближайшие ивенты</h3>
       {events.length === 0 && <p className="muted">Пока ничего нет — создай первый ивент!</p>}
       {events.map((e) => (
-        <div className="event" key={e.id} onClick={() => go('events')}>
+        <div className="event pop" key={e.id} onClick={() => go('events')}>
           <div>
             <b>{e.title}</b>
             <p>{fmtDateTime(e.date)} · {e.place || 'Место не указано'}</p>

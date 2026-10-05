@@ -10,7 +10,8 @@ import { modeusLogin, fetchLessons, ensureFreshSession, tokenInfo } from '../int
   const fresh = await ensureFreshSession(session);
   const from = new Date().toISOString().slice(0, 10);
   const to = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
-  const lessons = await fetchLessons(fresh, personId, from, to);
+  const { lessons, selfName } = await fetchLessons(fresh, personId, from, to);
+  console.log('имя из расписания:', selfName ?? '— не найдено');
   console.log(`✔ занятий за ${from}…${to}: ${lessons.length}`);
   for (const l of lessons.slice(0, 15)) console.log(`${l.start.slice(0, 16)}  [${l.kindLabel}] ${l.title} — ${l.room ?? l.online ?? '?'} — ${l.teachers.join(', ')}`);
 })().catch((e) => {

@@ -78,7 +78,7 @@ export function sendVerificationEmail(to: string, name: string | null, link: str
   const hi = name ? `, ${esc(name)}` : '';
   const html = `<!doctype html><html><body style="margin:0;background:#EAF1FF;font-family:Arial,sans-serif">
 <div style="max-width:480px;margin:0 auto;padding:28px 16px">
- <div style="background:#1455D9;color:#fff;border-radius:20px 20px 0 0;padding:22px 26px;font-size:28px;font-weight:800;letter-spacing:-1px">ПАРА</div>
+ <div style="background:#1455D9;color:#fff;border-radius:20px 20px 0 0;padding:24px 26px;font-size:28px;font-weight:800;letter-spacing:-1px"><img src="${esc(config.webappUrl)}/logo-white.png" alt="ПАРА" width="120" style="display:block;height:auto;border:0"></div>
  <div style="background:#fff;border-radius:0 0 20px 20px;padding:26px;color:#0B1630">
   <h2 style="margin:0 0 12px">Подтверди почту${hi}</h2>
   <p style="line-height:1.5;margin:0 0 22px">Нажми на кнопку, чтобы подтвердить email в приложении ПАРА. Ссылка действует 30 минут.</p>

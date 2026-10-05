@@ -72,6 +72,19 @@ export type Lesson = {
   cancelled: boolean;
 };
 
+export type Grade = {
+  id: string;
+  subject: string;
+  kind: 'exam' | 'credit' | 'coursework' | 'test' | 'other';
+  kindLabel: string;
+  value: string;
+  numeric: number | null;
+  max: number | null;
+  date: string | null;
+  semester: string | null;
+  teacher: string | null;
+};
+
 export type EventItem = {
   id: string;
   title: string;

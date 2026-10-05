@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, MapPin, User as UserIcon, Video } from 'lucide-react';
 import { api, ApiError, Lesson } from '../api';
 import { addDays, fmtDayLong, fmtDayNum, fmtDayShort, fmtTime, fmtWeek, mondayOf, toYmd, todayYmd } from '../dates';
+import { SkeletonList } from '../ui';
 import { ModeusLogin } from './ModeusLogin';
 
 export function LessonCard({ l }: { l: Lesson }) {
@@ -88,7 +89,7 @@ export function Schedule({ onLinked }: { onLinked: () => void }) {
 
   if (state === 'notlinked' || state === 'relogin')
     return (
-      <main>
+      <main className="view">
         <ModeusLogin relogin={state === 'relogin'} onLinked={() => { onLinked(); load(); }} />
       </main>
     );
@@ -97,7 +98,7 @@ export function Schedule({ onLinked }: { onLinked: () => void }) {
   const list = byDay.get(day) ?? [];
 
   return (
-    <main>
+    <main className="view">
       <div className="weekbar">
         <button aria-label="Предыдущая неделя" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={20} /></button>
         <div>
@@ -119,15 +120,19 @@ export function Schedule({ onLinked }: { onLinked: () => void }) {
 
       <h3 className="dayhead">{fmtDayLong(day)}</h3>
       {stale && <p className="msg">Modeus сейчас недоступен — показаны сохранённые данные.</p>}
-      {state === 'loading' && <p className="muted center">Загружаем расписание…</p>}
+      {state === 'loading' && <SkeletonList n={3} h={92} />}
       {state === 'error' && (
         <div className="panel">
           <p className="msg err">{error}</p>
           <button className="btn" onClick={load}>Повторить</button>
         </div>
       )}
-      {state === 'ok' && list.length === 0 && <p className="muted center">В этот день пар нет 🎉</p>}
-      {state === 'ok' && list.map((l) => <LessonCard key={l.id} l={l} />)}
+      {state === 'ok' && list.length === 0 && <p className="muted center pop">В этот день пар нет 🎉</p>}
+      {state === 'ok' && (
+        <div className="stagger" key={day}>
+          {list.map((l) => <LessonCard key={l.id} l={l} />)}
+        </div>
+      )}
     </main>
   );
 }
